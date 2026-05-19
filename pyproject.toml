@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docmark"
+version = "0.1.0"
+description = "Drop a document, get clean Markdown — for humans, LLMs, and agents."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Karla Lucic" }]
+keywords = ["markdown", "pdf", "docx", "pptx", "xlsx", "ocr", "llm", "rag"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+dependencies = [
+    "pywebview>=5.0",
+    "openai>=1.40",
+    "keyring>=24.0",
+    "platformdirs>=4.0",
+    "docling>=2.0",
+    "pypdfium2>=4.30",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "python-pptx>=1.0",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+docmark = "docmark.app:main"
+
+[project.urls]
+Homepage = "https://github.com/karlalucic/docs-to-markdown"
+Issues = "https://github.com/karlalucic/docs-to-markdown/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["docmark*"]
+
+[tool.setuptools.package-data]
+docmark = []

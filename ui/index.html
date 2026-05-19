@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DocMark</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="appbar">
+    <h1>DocMark</h1>
+    <button id="settings-btn" class="icon-button" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </button>
+  </header>
+
+  <main>
+    <button id="dropzone" class="dropzone" type="button" aria-label="Drop files here or click to choose">
+      <div class="dropzone-inner">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <p class="dropzone-title">Drop files here</p>
+        <p class="dropzone-sub">or click to choose · PDF · DOCX · PPTX · XLSX</p>
+      </div>
+    </button>
+
+    <ul id="job-list" class="job-list" aria-live="polite"></ul>
+
+    <p id="empty-hint" class="empty-hint">Drag a document onto the window to convert it to Markdown.</p>
+  </main>
+
+  <div id="settings-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-labelledby="settings-title">
+      <header class="modal-head">
+        <h2 id="settings-title">Settings</h2>
+        <button class="icon-button" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <label class="field">
+          <span>OpenAI API key</span>
+          <input id="api-key" type="password" autocomplete="off" placeholder="sk-…" spellcheck="false">
+          <small id="api-key-status" class="hint"></small>
+        </label>
+
+        <label class="field">
+          <span>Vision model</span>
+          <input id="model" type="text" autocomplete="off" spellcheck="false">
+          <small class="hint">Default: gpt-4.1-mini — cheap, fast, good for OCR fallback.</small>
+        </label>
+
+        <label class="field">
+          <span>PDF render DPI</span>
+          <input id="dpi" type="number" min="72" max="400" step="1">
+          <small class="hint">200 is a good default. Raise for tiny text.</small>
+        </label>
+
+        <label class="field row">
+          <span>Detail</span>
+          <select id="detail">
+            <option value="auto">auto</option>
+            <option value="high">high</option>
+            <option value="low">low</option>
+          </select>
+        </label>
+
+        <label class="field row">
+          <input id="force-vision" type="checkbox">
+          <span>Force vision on every PDF page (skips Docling)</span>
+        </label>
+
+        <label class="field row">
+          <input id="pptx-vision" type="checkbox">
+          <span>Enable vision fallback for PPTX slides (requires LibreOffice)</span>
+        </label>
+
+        <label class="field row">
+          <input id="docx-image-desc" type="checkbox">
+          <span>Describe embedded DOCX images with the vision model</span>
+        </label>
+
+        <label class="field row">
+          <input id="cache-enabled" type="checkbox">
+          <span>Cache per-page results across runs</span>
+        </label>
+      </div>
+
+      <footer class="modal-foot">
+        <button id="settings-cancel" class="btn ghost" data-close>Cancel</button>
+        <button id="settings-save" class="btn primary">Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
