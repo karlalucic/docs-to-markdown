@@ -68,12 +68,22 @@
   window.onSelectionPreview = (payload) => showSelectionPreview(payload);
 
   conversionModal.addEventListener('click', (e) => {
-    if (e.target.dataset && e.target.dataset.conversionClose !== undefined) {
+    if (e.target.closest('[data-conversion-close]')) {
       cancelSelection();
     }
   });
   conversionCancel.addEventListener('click', cancelSelection);
   conversionConfirm.addEventListener('click', confirmSelection);
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!conversionModal.hidden) {
+      cancelSelection();
+      return;
+    }
+    if (!modal.hidden) {
+      closeModal();
+    }
+  });
 
   function showSelectionPreview(selection) {
     if (!selection || !selection.selection_id || !selection.total) {
@@ -224,7 +234,7 @@
 
   settingsBtn.addEventListener('click', () => openSettings());
   modal.addEventListener('click', (e) => {
-    if (e.target.dataset && e.target.dataset.close !== undefined) closeModal();
+    if (e.target.closest('[data-close]')) closeModal();
   });
   document.getElementById('settings-save').addEventListener('click', saveSettings);
 

@@ -25,13 +25,13 @@
           <polyline points="17 8 12 3 7 8"></polyline>
           <line x1="12" y1="3" x2="12" y2="15"></line>
         </svg>
-        <p class="dropzone-title">Drop files or folders here</p>
-        <p class="dropzone-sub">or click to choose files · PDF · DOCX · PPTX · XLSX</p>
+        <p class="dropzone-title">Drop Documents Here</p>
+        <p class="dropzone-sub">Click to choose files · PDF · DOCX · PPTX · XLSX</p>
       </div>
     </button>
 
     <div class="batch-actions" aria-label="Batch options">
-      <button id="folder-btn" class="btn ghost" type="button">Choose folder</button>
+      <button id="folder-btn" class="btn ghost" type="button">Choose Folder...</button>
     </div>
 
     <ul id="job-list" class="job-list" aria-live="polite"></ul>
@@ -41,10 +41,10 @@
 
   <div id="conversion-modal" class="modal" hidden>
     <div class="modal-backdrop" data-conversion-close></div>
-    <div class="modal-card" role="dialog" aria-labelledby="conversion-title">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="conversion-title">
       <header class="modal-head">
         <h2 id="conversion-title">Convert selected files?</h2>
-        <button class="icon-button" data-conversion-close aria-label="Close">
+        <button class="icon-button" data-conversion-close type="button" aria-label="Close">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
       </header>
@@ -62,10 +62,10 @@
 
   <div id="settings-modal" class="modal" hidden>
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-card" role="dialog" aria-labelledby="settings-title">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="modal-head">
         <h2 id="settings-title">Settings</h2>
-        <button class="icon-button" data-close aria-label="Close">
+        <button class="icon-button" data-close type="button" aria-label="Close">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
       </header>
@@ -125,8 +125,8 @@
       </div>
 
       <footer class="modal-foot">
-        <button id="settings-cancel" class="btn ghost" data-close>Cancel</button>
-        <button id="settings-save" class="btn primary">Save</button>
+        <button id="settings-cancel" class="btn ghost" data-close type="button">Cancel</button>
+        <button id="settings-save" class="btn primary" type="button">Save</button>
       </footer>
     </div>
   </div>
