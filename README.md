@@ -56,7 +56,7 @@ sudo apt install libreoffice              # Linux
 
 ## Use
 
-Drag one or more files onto the window. Each gets a `.md` written next to it:
+Drag one or more files onto the window, or drop an entire folder to preview every supported document inside it. Confirm the batch, then each file gets a `.md` written next to it:
 
 ```
 ~/Documents/report.pdf  →  ~/Documents/report.md

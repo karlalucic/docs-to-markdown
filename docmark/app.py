@@ -16,7 +16,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import webview
 from webview.dom import DOMEventHandler
@@ -53,6 +53,7 @@ class JsApi:
         self._pipeline = self._build_pipeline()
         self._pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="docmark-job")
         self._jobs: Dict[str, Job] = {}
+        self._pending_batches: Dict[str, List[Path]] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -70,21 +71,35 @@ class JsApi:
     # ------------------------------------------------------------------
 
     def enqueue(self, paths: List[str]) -> List[Dict]:
-        """Queue one or more files for conversion. Returns the visible job rows."""
-        if not paths:
-            return []
+        """Queue files or folders for conversion. Returns the visible job rows."""
+        return self._enqueue_documents(self._collect_document_paths(paths))
 
+    def prepare_conversion(self, paths: List[str]) -> Dict:
+        """Prepare a selected batch and return a confirmation preview."""
+        documents = self._collect_document_paths(paths)
+        if not documents:
+            return self._selection_to_dict(None, [])
+
+        selection_id = uuid.uuid4().hex[:12]
+        with self._lock:
+            self._pending_batches[selection_id] = documents
+        return self._selection_to_dict(selection_id, documents)
+
+    def confirm_selection(self, selection_id: str) -> List[Dict]:
+        """Start converting a previously prepared batch."""
+        with self._lock:
+            documents = self._pending_batches.pop(selection_id, [])
+        return self._enqueue_documents(documents)
+
+    def cancel_selection(self, selection_id: str) -> None:
+        """Forget a prepared batch without converting it."""
+        with self._lock:
+            self._pending_batches.pop(selection_id, None)
+
+    def _enqueue_documents(self, documents: Iterable[Path]) -> List[Dict]:
         results: List[Dict] = []
         accepted: List[Job] = []
-        for raw in paths:
-            try:
-                path = Path(raw).expanduser().resolve()
-            except Exception:  # noqa: BLE001
-                continue
-            if not path.is_file():
-                continue
-            if path.suffix.lower() not in SUPPORTED_EXTS:
-                continue
+        for path in documents:
             job = Job(job_id=uuid.uuid4().hex[:12], path=path)
             with self._lock:
                 self._jobs[job.job_id] = job
@@ -96,18 +111,80 @@ class JsApi:
             self._pool.submit(self._run_job, job.job_id)
         return results
 
-    def pick_files(self) -> List[Dict]:
-        """Open the native file picker and enqueue whatever the user selects."""
+    @staticmethod
+    def _selection_to_dict(selection_id: Optional[str], documents: List[Path]) -> Dict:
+        preview_limit = 20
+        files = [
+            {"filename": path.name, "path": str(path)}
+            for path in documents[:preview_limit]
+        ]
+        return {
+            "selection_id": selection_id,
+            "total": len(documents),
+            "files": files,
+            "hidden_count": max(0, len(documents) - preview_limit),
+        }
+
+    @staticmethod
+    def _collect_document_paths(paths: Iterable[str]) -> List[Path]:
+        """Expand files and directories into a de-duplicated, stable file list."""
+        documents: List[Path] = []
+        seen: set[str] = set()
+
+        for raw in paths:
+            try:
+                path = Path(raw).expanduser().resolve()
+            except Exception:  # noqa: BLE001
+                continue
+
+            if path.is_dir():
+                try:
+                    candidates = sorted(
+                        (p for p in path.rglob("*") if p.is_file()),
+                        key=lambda p: str(p).lower(),
+                    )
+                except OSError:
+                    logger.warning("Could not scan dropped folder: %s", path)
+                    continue
+            else:
+                candidates = [path]
+
+            for candidate in candidates:
+                if not candidate.is_file():
+                    continue
+                if candidate.suffix.lower() not in SUPPORTED_EXTS:
+                    continue
+                key = str(candidate)
+                if key in seen:
+                    continue
+                seen.add(key)
+                documents.append(candidate)
+
+        return documents
+
+    def pick_files(self) -> Dict:
+        """Open the native file picker and prepare selected files for confirmation."""
         if self._window is None:
-            return []
+            return self._selection_to_dict(None, [])
         selection = self._window.create_file_dialog(
-            webview.OPEN_DIALOG,
+            webview.FileDialog.OPEN,
             allow_multiple=True,
             file_types=FILE_DIALOG_TYPES,
         )
         if not selection:
-            return []
-        return self.enqueue(list(selection))
+            return self._selection_to_dict(None, [])
+        return self.prepare_conversion(list(selection))
+
+    def pick_folder(self) -> Dict:
+        """Open the native folder picker and prepare supported files for confirmation."""
+        if self._window is None:
+            return self._selection_to_dict(None, [])
+        selection = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+        if not selection:
+            return self._selection_to_dict(None, [])
+        if isinstance(selection, str):
+            return self.prepare_conversion([selection])
+        return self.prepare_conversion(list(selection))
 
     def _run_job(self, job_id: str) -> None:
         with self._lock:
@@ -155,6 +232,16 @@ class JsApi:
             )
         except Exception:  # noqa: BLE001
             logger.exception("Failed to push job update to UI")
+
+    def _push_selection_to_ui(self, payload: Dict) -> None:
+        if self._window is None:
+            return
+        try:
+            self._window.evaluate_js(
+                f"window.onSelectionPreview && window.onSelectionPreview({json.dumps(payload)})"
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to push selection preview to UI")
 
     @staticmethod
     def _job_to_dict(job: Job) -> Dict:
@@ -242,7 +329,7 @@ def _wire_dom(api: JsApi, window: webview.Window) -> None:
             except Exception:  # noqa: BLE001
                 paths = []
         if paths:
-            api.enqueue([str(p) for p in paths])
+            api._push_selection_to_ui(api.prepare_conversion([str(p) for p in paths]))
 
     window.dom.document.events.drop += DOMEventHandler(
         on_drop, prevent_default=True, stop_propagation=True

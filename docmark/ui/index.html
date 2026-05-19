@@ -18,22 +18,47 @@
   </header>
 
   <main>
-    <button id="dropzone" class="dropzone" type="button" aria-label="Drop files here or click to choose">
+    <button id="dropzone" class="dropzone" type="button" aria-label="Drop files or folders here, or click to choose files">
       <div class="dropzone-inner">
         <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="17 8 12 3 7 8"></polyline>
           <line x1="12" y1="3" x2="12" y2="15"></line>
         </svg>
-        <p class="dropzone-title">Drop files here</p>
-        <p class="dropzone-sub">or click to choose · PDF · DOCX · PPTX · XLSX</p>
+        <p class="dropzone-title">Drop files or folders here</p>
+        <p class="dropzone-sub">or click to choose files · PDF · DOCX · PPTX · XLSX</p>
       </div>
     </button>
 
+    <div class="batch-actions" aria-label="Batch options">
+      <button id="folder-btn" class="btn ghost" type="button">Choose folder</button>
+    </div>
+
     <ul id="job-list" class="job-list" aria-live="polite"></ul>
 
-    <p id="empty-hint" class="empty-hint">Drag a document onto the window to convert it to Markdown.</p>
+    <p id="empty-hint" class="empty-hint">Drag documents or a folder onto the window to convert them to Markdown.</p>
   </main>
+
+  <div id="conversion-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-conversion-close></div>
+    <div class="modal-card" role="dialog" aria-labelledby="conversion-title">
+      <header class="modal-head">
+        <h2 id="conversion-title">Convert selected files?</h2>
+        <button class="icon-button" data-conversion-close aria-label="Close">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </header>
+      <div class="modal-body">
+        <p id="conversion-count" class="confirm-summary"></p>
+        <ul id="conversion-list" class="file-preview"></ul>
+        <p id="conversion-overflow" class="hint"></p>
+      </div>
+      <footer class="modal-foot">
+        <button id="conversion-cancel" class="btn ghost" type="button">Cancel</button>
+        <button id="conversion-confirm" class="btn primary" type="button">Convert</button>
+      </footer>
+    </div>
+  </div>
 
   <div id="settings-modal" class="modal" hidden>
     <div class="modal-backdrop" data-close></div>

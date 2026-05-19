@@ -5,12 +5,20 @@
 
 (() => {
   const dropzone = document.getElementById('dropzone');
+  const folderBtn = document.getElementById('folder-btn');
   const jobList = document.getElementById('job-list');
   const emptyHint = document.getElementById('empty-hint');
   const settingsBtn = document.getElementById('settings-btn');
   const modal = document.getElementById('settings-modal');
+  const conversionModal = document.getElementById('conversion-modal');
+  const conversionCount = document.getElementById('conversion-count');
+  const conversionList = document.getElementById('conversion-list');
+  const conversionOverflow = document.getElementById('conversion-overflow');
+  const conversionConfirm = document.getElementById('conversion-confirm');
+  const conversionCancel = document.getElementById('conversion-cancel');
 
   const jobRows = new Map();
+  let pendingSelectionId = null;
 
   // ---------------------------------------------------------------------
   // Drag styling (Python owns the actual drop event)
@@ -44,8 +52,82 @@
   // ---------------------------------------------------------------------
   dropzone.addEventListener('click', async () => {
     if (!window.pywebview || !window.pywebview.api) return;
-    await window.pywebview.api.pick_files();
+    await pickBatch(() => window.pywebview.api.pick_files());
   });
+
+  folderBtn.addEventListener('click', async () => {
+    if (!window.pywebview || !window.pywebview.api) return;
+    await pickBatch(() => window.pywebview.api.pick_folder());
+  });
+
+  async function pickBatch(action) {
+    const selection = await action();
+    showSelectionPreview(selection);
+  }
+
+  window.onSelectionPreview = (payload) => showSelectionPreview(payload);
+
+  conversionModal.addEventListener('click', (e) => {
+    if (e.target.dataset && e.target.dataset.conversionClose !== undefined) {
+      cancelSelection();
+    }
+  });
+  conversionCancel.addEventListener('click', cancelSelection);
+  conversionConfirm.addEventListener('click', confirmSelection);
+
+  function showSelectionPreview(selection) {
+    if (!selection || !selection.selection_id || !selection.total) {
+      if (jobRows.size === 0) {
+        emptyHint.textContent = 'No supported documents found.';
+      }
+      return;
+    }
+
+    if (pendingSelectionId && pendingSelectionId !== selection.selection_id && window.pywebview && window.pywebview.api) {
+      window.pywebview.api.cancel_selection(pendingSelectionId);
+    }
+    pendingSelectionId = selection.selection_id;
+    conversionCount.textContent = `${selection.total} file${selection.total === 1 ? '' : 's'} will be converted to Markdown.`;
+    conversionList.replaceChildren();
+
+    (selection.files || []).forEach((file) => {
+      const li = document.createElement('li');
+      const name = document.createElement('span');
+      name.className = 'preview-name';
+      name.textContent = file.filename;
+      name.title = file.path || file.filename;
+      li.appendChild(name);
+      conversionList.appendChild(li);
+    });
+
+    conversionOverflow.textContent = selection.hidden_count > 0
+      ? `And ${selection.hidden_count} more.`
+      : '';
+    conversionConfirm.textContent = `Convert ${selection.total}`;
+    conversionModal.hidden = false;
+  }
+
+  async function confirmSelection() {
+    if (!pendingSelectionId || !window.pywebview || !window.pywebview.api) return;
+    const selectionId = pendingSelectionId;
+    closeConversionModal();
+    await window.pywebview.api.confirm_selection(selectionId);
+  }
+
+  async function cancelSelection() {
+    const selectionId = pendingSelectionId;
+    closeConversionModal();
+    if (selectionId && window.pywebview && window.pywebview.api) {
+      await window.pywebview.api.cancel_selection(selectionId);
+    }
+  }
+
+  function closeConversionModal() {
+    pendingSelectionId = null;
+    conversionModal.hidden = true;
+    conversionList.replaceChildren();
+    conversionOverflow.textContent = '';
+  }
 
   // ---------------------------------------------------------------------
   // Job updates pushed from Python
