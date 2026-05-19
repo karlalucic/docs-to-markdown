@@ -54,8 +54,13 @@
 
         <label class="field">
           <span>Vision model</span>
-          <input id="model" type="text" autocomplete="off" spellcheck="false">
-          <small class="hint">Default: gpt-4.1-mini — cheap, fast, good for OCR fallback.</small>
+          <select id="model">
+            <option value="gpt-4.1-mini">gpt-4.1-mini — default OCR value</option>
+            <option value="gpt-5-mini">gpt-5-mini — newer low-cost option</option>
+            <option value="gpt-4.1">gpt-4.1 — higher quality, higher cost</option>
+            <option value="gpt-4o">gpt-4o — legacy high quality</option>
+            <option value="o4-mini">o4-mini — reasoning, higher cost</option>
+          </select>
         </label>
 
         <label class="field">

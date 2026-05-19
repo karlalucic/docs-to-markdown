@@ -28,7 +28,7 @@ from docmark.utils import secrets
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+UI_DIR = Path(__file__).resolve().parent / "ui"
 SUPPORTED_EXTS = {".pdf", ".docx", ".pptx", ".ppt", ".xlsx"}
 FILE_DIALOG_TYPES = ("Documents (*.pdf;*.docx;*.pptx;*.ppt;*.xlsx)",)
 
@@ -92,6 +92,7 @@ class JsApi:
             results.append(self._job_to_dict(job))
 
         for job in accepted:
+            self._push_to_ui(self._job_to_dict(job))
             self._pool.submit(self._run_job, job.job_id)
         return results
 
@@ -259,7 +260,7 @@ def main() -> None:
     if not index.exists():
         raise FileNotFoundError(
             f"UI bundle not found at {index}. "
-            "Run from a checkout that includes the ui/ directory."
+            "Reinstall DocMark from a package that includes docmark/ui assets."
         )
 
     window = webview.create_window(

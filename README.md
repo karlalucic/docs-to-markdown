@@ -22,17 +22,26 @@ Use it for things like:
 
 ## How it works
 
-Two tiers, in order:
+PDF conversion uses two tiers, in order:
 
 1. **Docling** reads the document's text layer and structure. Fast, accurate, free.
 2. **OpenAI vision fallback** (`gpt-4.1-mini` by default) kicks in only for pages Docling can't handle well — scanned PDFs, complex tables, technical diagrams.
 
 Most native PDFs never touch the API.
 
+DOCX, PPTX, and XLSX use lightweight native parsers in v1. PPTX can optionally use vision fallback for complex slides.
+
 ## Install
 
+Requirements:
+
+- Python 3.10+
+- An OpenAI API key for scanned PDFs and vision fallback
+- A working desktop webview backend (`pywebview` installs the Python side)
+- Internet access on first Docling run if model assets are not already cached
+
 ```bash
-pip install -e .
+python3 -m pip install -e .
 docmark
 ```
 
@@ -59,7 +68,7 @@ If `report.md` already exists, the new file is `report-1.md`.
 
 | Setting | Default | Notes |
 |---|---|---|
-| Vision model | `gpt-4.1-mini` | Any OpenAI multimodal model works |
+| Vision model | `gpt-4.1-mini` | Strong GPT-4-class value default; `gpt-5-mini` is worth benchmarking if you allow GPT-5 models |
 | PDF render DPI | `200` | Raise for tiny text or noisy scans |
 | Detail | `high` | `low` / `high` / `auto` |
 | Force vision | off | Skip Docling, send every PDF page to the model |

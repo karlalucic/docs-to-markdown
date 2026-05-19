@@ -11,6 +11,8 @@ TODO(v2): unify DOCX/PPTX/XLSX on Docling's DocumentConverter +
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 import os
@@ -19,7 +21,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, List, Literal, Optional
 
@@ -175,8 +177,17 @@ class DocumentPipeline:
             )
         self.heuristics = HeuristicEvaluator(settings)
         self.cache = CacheManager(cache_dir()) if settings.cache_enabled else None
-        self._config_hash = CACHE_SCHEMA_VERSION
+        self._config_hash = self._build_config_hash(settings)
         self._libreoffice_cmd = self._check_libreoffice_available()
+
+    @staticmethod
+    def _build_config_hash(settings: Settings) -> str:
+        payload = asdict(settings)
+        payload.pop("openai_api_key", None)
+        payload["has_openai_api_key"] = bool(settings.openai_api_key)
+        payload["schema"] = CACHE_SCHEMA_VERSION
+        raw = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
     @staticmethod
     def _check_libreoffice_available() -> Optional[str]:
