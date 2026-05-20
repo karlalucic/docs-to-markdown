@@ -54,6 +54,26 @@ brew install --cask libreoffice          # macOS
 sudo apt install libreoffice              # Linux
 ```
 
+## macOS Desktop Launcher
+
+You do not need to run DocMark from Terminal every time. To make a simple launcher app:
+
+1. Open **Automator**.
+2. Choose **Application**.
+3. Add **Run Shell Script**.
+4. Set the shell to `/bin/zsh`.
+5. Paste:
+
+```zsh
+cd /Users/karlalucic/Code/personal/document-conversion
+nohup ./.venv/bin/docmark >/tmp/docmark.log 2>&1 &
+```
+
+6. Save it as `DocMark.app` in **Applications** or on your Desktop.
+7. Double-click `DocMark.app` to launch it, or drag it to the Dock.
+
+The `nohup ... &` part starts DocMark in the background, so Automator does not stay stuck in a permanent "Running" state. Logs go to `/tmp/docmark.log`.
+
 ## Use
 
 Drag one or more files onto the window, or drop an entire folder to preview every supported document inside it. Confirm the batch, then each file gets a `.md` written next to it:
