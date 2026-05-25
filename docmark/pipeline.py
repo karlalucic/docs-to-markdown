@@ -50,6 +50,16 @@ from docmark.utils.pdf_utils import get_pdf_page_count
 logger = logging.getLogger(__name__)
 
 CACHE_SCHEMA_VERSION = "docmark-v1"
+CHECKPOINT_VERSION = 1
+
+
+def _file_fingerprint(path: Path) -> str:
+    """Quick identity string for a file: first-1 MB MD5 + mtime (int seconds)."""
+    with open(path, "rb") as fh:
+        sample = fh.read(1024 * 1024)
+    digest = hashlib.md5(sample).hexdigest()[:16]  # noqa: S324 — identity, not security
+    mtime = int(path.stat().st_mtime)
+    return f"{digest}_{mtime}"
 
 ProgressStage = Literal[
     "loading", "docling", "vision", "office", "writing", "done"
@@ -204,6 +214,64 @@ class DocumentPipeline:
         )
 
     # ------------------------------------------------------------------
+    # Checkpoint helpers (crash recovery / resume)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _checkpoint_path(source: Path) -> Path:
+        """Hidden sidecar file next to the source document."""
+        return source.parent / f".{source.name}.docmark-progress"
+
+    def _load_checkpoint(self, source: Path) -> dict[int, PageResult]:
+        """Load per-page results from a previous interrupted run.
+
+        Returns an empty dict if no valid checkpoint exists.
+        """
+        cp = self._checkpoint_path(source)
+        if not cp.exists():
+            return {}
+        try:
+            data = json.loads(cp.read_text(encoding="utf-8"))
+            if data.get("version") != CHECKPOINT_VERSION:
+                return {}
+            if data.get("config_hash") != self._config_hash:
+                return {}
+            if data.get("file_fingerprint") != _file_fingerprint(source):
+                return {}
+            pages: dict[int, PageResult] = {}
+            for k, v in data.get("pages", {}).items():
+                pages[int(k)] = PageResult(**v)
+            logger.info("Checkpoint: loaded %d pages for %s", len(pages), source.name)
+            return pages
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not load checkpoint for %s — starting fresh", source.name)
+            return {}
+
+    def _write_checkpoint(
+        self, source: Path, pages: dict[int, PageResult]
+    ) -> None:
+        """Atomically persist completed page results for crash recovery."""
+        cp = self._checkpoint_path(source)
+        try:
+            data: dict = {
+                "version": CHECKPOINT_VERSION,
+                "config_hash": self._config_hash,
+                "file_fingerprint": _file_fingerprint(source),
+                "pages": {str(k): v.model_dump() for k, v in pages.items()},
+            }
+            tmp = cp.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            tmp.rename(cp)
+        except Exception:  # noqa: BLE001
+            pass  # Checkpoint is best-effort; never break conversion
+
+    def _remove_checkpoint(self, source: Path) -> None:
+        try:
+            self._checkpoint_path(source).unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
@@ -215,17 +283,25 @@ class DocumentPipeline:
         """Convert a single file to Markdown and write it next to the source.
 
         Returns the path of the written .md file. Raises on unrecoverable failure.
+        On PDF files the pipeline writes a per-page checkpoint after every page
+        so that a restart can resume without re-spending API credits.
         """
         path = Path(path).expanduser().resolve()
         if not path.is_file():
             raise FileNotFoundError(f"Not a file: {path}")
 
+        checkpoint = self._load_checkpoint(path)
+        if checkpoint:
+            msg = f"Resuming {path.name} — {len(checkpoint)} pages already done"
+        else:
+            msg = f"Loading {path.name}"
+
         _emit(
             progress_callback,
-            ProgressEvent(stage="loading", percent=0.0, message=f"Loading {path.name}"),
+            ProgressEvent(stage="loading", percent=0.0, message=msg),
         )
 
-        result = self._process_document(path, progress_callback)
+        result = self._process_document(path, progress_callback, checkpoint=checkpoint)
 
         _emit(
             progress_callback,
@@ -233,6 +309,9 @@ class DocumentPipeline:
         )
         out_path = self._unique_output_path(path)
         out_path.write_text(self._render_markdown(result), encoding="utf-8")
+
+        # Conversion succeeded — remove the in-progress checkpoint.
+        self._remove_checkpoint(path)
 
         _emit(
             progress_callback,
@@ -245,7 +324,10 @@ class DocumentPipeline:
     # ------------------------------------------------------------------
 
     def _process_document(
-        self, path: Path, cb: Optional[ProgressCallback]
+        self,
+        path: Path,
+        cb: Optional[ProgressCallback],
+        checkpoint: Optional[dict[int, "PageResult"]] = None,
     ) -> DocumentResult:
         if self.cache is not None:
             cached = self.cache.load_document_cache(path, config_hash=self._config_hash)
@@ -258,7 +340,7 @@ class DocumentPipeline:
 
         doc_type = get_document_type(path)
         if doc_type == "pdf":
-            result = self._process_pdf(path, cb)
+            result = self._process_pdf(path, cb, checkpoint=checkpoint or {})
         elif doc_type == "docx":
             result = self._process_docx(path, cb)
         elif doc_type == "xlsx":
@@ -283,22 +365,38 @@ class DocumentPipeline:
     # ------------------------------------------------------------------
 
     def _process_pdf(
-        self, pdf_path: Path, cb: Optional[ProgressCallback]
+        self,
+        pdf_path: Path,
+        cb: Optional[ProgressCallback],
+        checkpoint: Optional[dict[int, "PageResult"]] = None,
     ) -> DocumentResult:
+        """Process a PDF file with per-page checkpoint support.
+
+        ``checkpoint`` maps already-completed page numbers → their PageResult.
+        Pages present in the checkpoint are reused as-is; we only run Docling
+        (and potentially vision) for the remaining pages.  After every new page
+        is finalised the checkpoint file is updated so a crash only loses
+        work for the page in flight.
+        """
         doc_start = time.time()
         page_count = get_pdf_page_count(pdf_path)
+        checkpoint = dict(checkpoint or {})  # mutable working copy
+
+        pages_needed = [p for p in range(1, page_count + 1) if p not in checkpoint]
 
         docling_result: Any = None
         tier1_pages: List[PageResult] = []
         tier1_error: Optional[str] = None
 
-        if not self.settings.force_vision:
+        if pages_needed and not self.settings.force_vision:
             try:
                 docling_result, tier1_pages = self.tier1.parse_document(pdf_path)
             except Exception as e:  # noqa: BLE001
                 tier1_error = str(e)
                 logger.error("Docling failed for %s: %s", pdf_path.name, e)
-        else:
+        elif not pages_needed:
+            logger.info("All %d pages loaded from checkpoint for %s", page_count, pdf_path.name)
+        elif self.settings.force_vision:
             tier1_error = "force_vision enabled"
 
         pages: List[PageResult] = []
@@ -306,6 +404,21 @@ class DocumentPipeline:
 
         for page_num in range(1, page_count + 1):
             percent = 10.0 + (page_num - 1) / max(page_count, 1) * 80.0
+
+            # Reuse checkpoint result — no Docling or vision needed for this page.
+            if page_num in checkpoint:
+                pages.append(checkpoint[page_num])
+                _emit(
+                    cb,
+                    ProgressEvent(
+                        stage="docling",
+                        percent=percent,
+                        message=f"Page {page_num}/{page_count} (resumed)",
+                    ),
+                )
+                summary.tier1_pages += 1
+                continue
+
             _emit(
                 cb,
                 ProgressEvent(
@@ -331,6 +444,10 @@ class DocumentPipeline:
                 page_percent_span=80.0 / max(page_count, 1),
             )
             pages.append(page_result)
+
+            # Persist this page so a crash can resume from here.
+            checkpoint[page_num] = page_result
+            self._write_checkpoint(pdf_path, checkpoint)
 
         summary.total_processing_time_seconds = time.time() - doc_start
         overall_confidence = (

@@ -4,6 +4,7 @@ Tier 1: Docling layout parser.
 Primary document extraction using Docling library.
 """
 
+import threading
 from pathlib import Path
 from typing import List, Any
 import time
@@ -32,6 +33,11 @@ from docmark.models.quality_metrics import ConfidenceScore
 
 
 logger = logging.getLogger(__name__)
+
+# Docling's DocumentConverter is not thread-safe for concurrent convert() calls.
+# This lock serialises all Docling conversions across the process so concurrent
+# jobs don't corrupt each other's ML-model state.
+_DOCLING_LOCK = threading.Lock()
 
 
 class DoclingParser:
@@ -64,8 +70,9 @@ class DoclingParser:
         Returns:
             Tuple of (ConversionResult with metadata, List of PageResult objects)
         """
-        # Convert document
-        result = self.converter.convert(str(pdf_path))
+        # Convert document — serialised across threads (Docling is not thread-safe).
+        with _DOCLING_LOCK:
+            result = self.converter.convert(str(pdf_path))
 
         blocks_by_page = None
         if CONTENT_LAYER_AVAILABLE:
