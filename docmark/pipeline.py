@@ -379,7 +379,13 @@ class DocumentPipeline:
         work for the page in flight.
         """
         doc_start = time.time()
-        page_count = get_pdf_page_count(pdf_path)
+        try:
+            page_count = get_pdf_page_count(pdf_path)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(
+                f"Cannot open '{pdf_path.name}' — the file may be corrupt, "
+                f"password-protected, or in an unsupported PDF variant. ({e})"
+            ) from e
         checkpoint = dict(checkpoint or {})  # mutable working copy
 
         pages_needed = [p for p in range(1, page_count + 1) if p not in checkpoint]

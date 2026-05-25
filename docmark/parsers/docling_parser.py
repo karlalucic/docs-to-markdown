@@ -54,10 +54,14 @@ class DoclingParser:
         Args:
             table_confidence_threshold: Threshold for table extraction quality
         """
-        # Configure PDF processing options with OCR disabled
+        # Store format options so parse_document() can create a fresh converter
+        # for each call.  A fresh converter resets docling-parse's C++ backend
+        # state, preventing the "fail to load document" errors that accumulate
+        # after several sequential conversions on the same DocumentConverter
+        # instance.  Model weights are cached globally by HuggingFace/PyTorch
+        # so re-instantiation is cheap after the first call.
         pipeline_options = PdfPipelineOptions(do_ocr=False)
-        format_options = {InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
-        self.converter = DocumentConverter(format_options=format_options)
+        self._format_options = {InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
         self.table_threshold = table_confidence_threshold
 
     def parse_document(self, pdf_path: Path) -> tuple[Any, List[PageResult]]:
@@ -70,9 +74,15 @@ class DoclingParser:
         Returns:
             Tuple of (ConversionResult with metadata, List of PageResult objects)
         """
-        # Convert document — serialised across threads (Docling is not thread-safe).
+        # Create a fresh DocumentConverter for every call — this resets the
+        # docling-parse C++ backend state that would otherwise accumulate across
+        # sequential conversions and cause "fail to load document" failures
+        # starting with the 4th file.  Model weights are cached at the
+        # HuggingFace/PyTorch level so re-instantiation is fast after first use.
+        # The lock serialises all Docling work across threads (not thread-safe).
         with _DOCLING_LOCK:
-            result = self.converter.convert(str(pdf_path))
+            converter = DocumentConverter(format_options=self._format_options)
+            result = converter.convert(str(pdf_path))
 
         blocks_by_page = None
         if CONTENT_LAYER_AVAILABLE:
