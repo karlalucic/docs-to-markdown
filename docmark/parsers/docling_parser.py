@@ -105,9 +105,8 @@ class DoclingParser:
             else:
                 blocks = self._extract_blocks(page_content)
 
-            # Calculate confidence from Docling's per-page confidence report
-            # page_num is 1-indexed, but page_idx needs to be 0-indexed
-            confidence = ConfidenceScore.from_docling_output(result, page_num - 1)
+            # Calculate confidence from Docling's per-page confidence report.
+            confidence = ConfidenceScore.from_docling_output(result, page_num)
 
             # Fix NaN confidence: use sensible defaults
             if len(blocks) == 0:

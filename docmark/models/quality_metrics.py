@@ -2,6 +2,8 @@
 Quality metrics and confidence scoring for document extraction.
 """
 
+import math
+from collections.abc import Mapping
 from typing import Any, Optional
 from pydantic import BaseModel
 
@@ -15,7 +17,7 @@ class ConfidenceScore(BaseModel):
     table_quality: Optional[float] = None
 
     @classmethod
-    def from_docling_output(cls, docling_result: Any, page_idx: int = 0) -> "ConfidenceScore":
+    def from_docling_output(cls, docling_result: Any, page_num: int = 1) -> "ConfidenceScore":
         """
         Calculate confidence from actual Docling output.
 
@@ -26,37 +28,36 @@ class ConfidenceScore(BaseModel):
 
         Args:
             docling_result: ConversionResult from Docling
-            page_idx: Page index (0-based) for per-page confidence
+            page_num: Page number (1-based) for per-page confidence
 
         Returns:
             ConfidenceScore instance with real quality metrics
         """
-        # Extract per-page confidence report from Docling
-        if hasattr(docling_result, 'confidence') and hasattr(docling_result.confidence, 'pages'):
+        page_conf = None
+        confidence = getattr(docling_result, "confidence", None)
+        pages = getattr(confidence, "pages", None)
+
+        if pages is not None:
             try:
-                page_conf = docling_result.confidence.pages[page_idx]
+                if isinstance(pages, Mapping):
+                    page_conf = pages.get(page_num) or pages.get(page_num - 1)
+                else:
+                    page_conf = pages[page_num - 1]
+            except (IndexError, AttributeError, KeyError, TypeError):
+                page_conf = None
 
-                layout_quality = page_conf.layout_score
-                text_quality = page_conf.parse_score
-                ocr_quality = page_conf.ocr_score
-
-                # Table score not yet fully implemented in Docling, use layout as proxy
-                table_quality = page_conf.table_score if page_conf.table_score > 0 else layout_quality
-
-                # Weighted average: layout and parse are most important
-                # OCR score is 0 for digital PDFs, so give it less weight
-                overall = (layout_quality * 0.4 + text_quality * 0.4 + ocr_quality * 0.2)
-
-            except (IndexError, AttributeError):
-                # Fallback if page index out of range or attribute missing
-                overall = layout_quality = text_quality = 0.85
-                ocr_quality = 0.0
-                table_quality = None
-        else:
-            # Fallback for older Docling versions or missing confidence data
+        if page_conf is None:
             overall = layout_quality = text_quality = 0.85
-            ocr_quality = 0.0
             table_quality = None
+        else:
+            layout_quality = _score(getattr(page_conf, "layout_score", None), 0.85)
+            text_quality = _score(getattr(page_conf, "parse_score", None), 0.85)
+            table_quality = _score(getattr(page_conf, "table_score", None), layout_quality)
+
+            overall = _score(getattr(page_conf, "mean_score", None), None)
+            if overall is None:
+                scores = [s for s in (layout_quality, text_quality) if s is not None]
+                overall = sum(scores) / len(scores) if scores else 0.85
 
         return cls(
             overall_score=overall,
@@ -64,3 +65,14 @@ class ConfidenceScore(BaseModel):
             layout_quality=layout_quality,
             table_quality=table_quality,
         )
+
+
+def _score(value: Any, fallback: Optional[float]) -> Optional[float]:
+    """Return a finite 0..1 score, ignoring Docling NaN placeholders."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(score):
+        return fallback
+    return max(0.0, min(1.0, score))

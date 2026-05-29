@@ -12,6 +12,8 @@ from platformdirs import user_cache_dir, user_config_dir
 from docmark.utils import secrets
 
 SETTINGS_FILENAME = "settings.json"
+DEFAULT_PDF_CONFIDENCE_THRESHOLD = 0.82
+LEGACY_PDF_CONFIDENCE_THRESHOLD = 0.92
 
 
 def _config_path() -> Path:
@@ -21,6 +23,7 @@ def _config_path() -> Path:
 def cache_dir() -> Path:
     path = Path(user_cache_dir("docmark"))
     path.mkdir(parents=True, exist_ok=True)
+    _chmod_best_effort(path, 0o700)
     return path
 
 
@@ -50,7 +53,7 @@ class Settings:
     force_vision: bool = False
 
     # PDF routing thresholds (carried over from the original pipeline)
-    pdf_confidence_threshold: float = 0.92
+    pdf_confidence_threshold: float = DEFAULT_PDF_CONFIDENCE_THRESHOLD
     table_confidence_threshold: float = 0.88
     picture_confidence_threshold: float = 0.85
     picture_description_min_length: int = 20
@@ -81,6 +84,8 @@ class Settings:
         else:
             data = {}
         data.pop("openai_api_key", None)
+        if data.get("pdf_confidence_threshold") == LEGACY_PDF_CONFIDENCE_THRESHOLD:
+            data["pdf_confidence_threshold"] = DEFAULT_PDF_CONFIDENCE_THRESHOLD
         instance = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
         instance.openai_api_key = secrets.get_openai_key()
         return instance
@@ -88,11 +93,23 @@ class Settings:
     def save(self) -> None:
         path = _config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        _chmod_best_effort(path.parent, 0o700)
         payload = {k: v for k, v in asdict(self).items() if k != "openai_api_key"}
-        path.write_text(json.dumps(payload, indent=2))
+        tmp = path.with_name(f".{path.name}.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        _chmod_best_effort(tmp, 0o600)
+        tmp.replace(path)
+        _chmod_best_effort(path, 0o600)
 
     def to_public_dict(self) -> dict:
         """Settings as seen by the UI — API key replaced with a boolean."""
         d = {k: v for k, v in asdict(self).items() if k != "openai_api_key"}
         d["has_api_key"] = bool(self.openai_api_key)
         return d
+
+
+def _chmod_best_effort(path: Path, mode: int) -> None:
+    try:
+        path.chmod(mode)
+    except OSError:
+        pass

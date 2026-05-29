@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, List, Literal, Optional
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 CACHE_SCHEMA_VERSION = "docmark-v1"
 CHECKPOINT_VERSION = 1
+OUTPUT_MARKER_VERSION = 1
 
 
 def _file_fingerprint(path: Path) -> str:
@@ -222,6 +224,11 @@ class DocumentPipeline:
         """Hidden sidecar file next to the source document."""
         return source.parent / f".{source.name}.docmark-progress"
 
+    @staticmethod
+    def _output_marker_path(source: Path) -> Path:
+        """Hidden sidecar tying a Markdown output to a source fingerprint."""
+        return source.parent / f".{source.name}.docmark-output.json"
+
     def _load_checkpoint(self, source: Path) -> dict[int, PageResult]:
         """Load per-page results from a previous interrupted run.
 
@@ -259,15 +266,54 @@ class DocumentPipeline:
                 "file_fingerprint": _file_fingerprint(source),
                 "pages": {str(k): v.model_dump() for k, v in pages.items()},
             }
-            tmp = cp.with_suffix(".tmp")
+            tmp = cp.with_name(f".{cp.name}.{uuid.uuid4().hex}.tmp")
             tmp.write_text(json.dumps(data), encoding="utf-8")
-            tmp.rename(cp)
+            _chmod_best_effort(tmp, 0o600)
+            tmp.replace(cp)
+            _chmod_best_effort(cp, 0o600)
         except Exception:  # noqa: BLE001
             pass  # Checkpoint is best-effort; never break conversion
 
     def _remove_checkpoint(self, source: Path) -> None:
         try:
             self._checkpoint_path(source).unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _load_marked_output(source: Path) -> Optional[Path]:
+        marker = DocumentPipeline._output_marker_path(source)
+        if not marker.exists():
+            return None
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            if data.get("version") != OUTPUT_MARKER_VERSION:
+                return None
+            if data.get("file_fingerprint") != _file_fingerprint(source):
+                return None
+            output_path = Path(data.get("output_path", ""))
+            if not output_path.is_absolute():
+                output_path = source.parent / output_path
+            if output_path.is_file():
+                return output_path
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
+    @staticmethod
+    def _write_output_marker(source: Path, output_path: Path) -> None:
+        marker = DocumentPipeline._output_marker_path(source)
+        try:
+            data = {
+                "version": OUTPUT_MARKER_VERSION,
+                "file_fingerprint": _file_fingerprint(source),
+                "output_path": str(output_path),
+            }
+            tmp = marker.with_name(f".{marker.name}.{uuid.uuid4().hex}.tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            _chmod_best_effort(tmp, 0o600)
+            tmp.replace(marker)
+            _chmod_best_effort(marker, 0o600)
         except Exception:  # noqa: BLE001
             pass
 
@@ -290,6 +336,18 @@ class DocumentPipeline:
         if not path.is_file():
             raise FileNotFoundError(f"Not a file: {path}")
 
+        existing_output = self.current_output_path(path, include_legacy=False)
+        if existing_output is not None:
+            _emit(
+                progress_callback,
+                ProgressEvent(
+                    stage="done",
+                    percent=100.0,
+                    message=f"Already converted: {existing_output.name}",
+                ),
+            )
+            return existing_output
+
         checkpoint = self._load_checkpoint(path)
         if checkpoint:
             msg = f"Resuming {path.name} — {len(checkpoint)} pages already done"
@@ -309,6 +367,7 @@ class DocumentPipeline:
         )
         out_path = self._unique_output_path(path)
         out_path.write_text(self._render_markdown(result), encoding="utf-8")
+        self._write_output_marker(path, out_path)
 
         # Conversion succeeded — remove the in-progress checkpoint.
         self._remove_checkpoint(path)
@@ -829,6 +888,35 @@ class DocumentPipeline:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def current_output_path(
+        source: Path,
+        include_legacy: bool = True,
+    ) -> Optional[Path]:
+        """Return a current Markdown output for this source if one exists."""
+        marked_output = DocumentPipeline._load_marked_output(source)
+        if marked_output is not None:
+            return marked_output
+        if not include_legacy:
+            return None
+
+        try:
+            source_mtime = source.stat().st_mtime
+        except OSError:
+            return None
+
+        candidate = source.with_suffix(".md")
+        if _is_current_output(candidate, source_mtime):
+            return candidate
+
+        for i in range(1, 1000):
+            alt = source.with_name(f"{source.stem}-{i}.md")
+            if not alt.exists():
+                break
+            if _is_current_output(alt, source_mtime):
+                return alt
+        return None
+
+    @staticmethod
     def _unique_output_path(source: Path) -> Path:
         candidate = source.with_suffix(".md")
         if not candidate.exists():
@@ -905,6 +993,20 @@ def _render_blocks(blocks: List[ContentBlock]) -> List[str]:
             lines.append(str(block.content))
             lines.append("")
     return lines
+
+
+def _is_current_output(candidate: Path, source_mtime: float) -> bool:
+    try:
+        return candidate.is_file() and candidate.stat().st_mtime >= source_mtime
+    except OSError:
+        return False
+
+
+def _chmod_best_effort(path: Path, mode: int) -> None:
+    try:
+        path.chmod(mode)
+    except OSError:
+        pass
 
 
 def _compute_office_confidence(blocks: List[ContentBlock]) -> float:

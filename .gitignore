@@ -26,3 +26,5 @@ env/
 .cache/
 processed_documents/
 input_documents/
+.*.docmark-progress
+.*.docmark-output.json

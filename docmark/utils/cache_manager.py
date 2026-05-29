@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 import json
 import hashlib
+import uuid
 from docmark.models.document_schema import PageResult, DocumentResult
 
 
@@ -27,6 +28,7 @@ class CacheManager:
         """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        _chmod_best_effort(self.cache_dir, 0o700)
 
     def get_cache_key(
         self, pdf_path: Path, page_num: Optional[int] = None,
@@ -99,7 +101,7 @@ class CacheManager:
         cache_key = self.get_cache_key(pdf_path, config_hash=config_hash)
         cache_file = self.cache_dir / f"{cache_key}_doc.json"
 
-        cache_file.write_text(json.dumps(result.to_dict(), indent=2))
+        _write_private_json(cache_file, result.to_dict())
 
     def load_page_cache(
         self, pdf_path: Path, page_num: int, tier: str,
@@ -147,7 +149,7 @@ class CacheManager:
         cache_key = self.get_cache_key(pdf_path, page_num, config_hash=config_hash)
         cache_file = self.cache_dir / f"{cache_key}_{tier}.json"
 
-        cache_file.write_text(json.dumps(result.model_dump(), indent=2))
+        _write_private_json(cache_file, result.model_dump())
 
     def clear_cache(self, pdf_path: Optional[Path] = None):
         """
@@ -164,3 +166,24 @@ class CacheManager:
         else:
             for cache_file in self.cache_dir.glob("*.json"):
                 cache_file.unlink()
+
+
+def _write_private_json(path: Path, payload: dict) -> None:
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        _chmod_best_effort(tmp, 0o600)
+        tmp.replace(path)
+        _chmod_best_effort(path, 0o600)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _chmod_best_effort(path: Path, mode: int) -> None:
+    try:
+        path.chmod(mode)
+    except OSError:
+        pass

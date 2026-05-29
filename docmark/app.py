@@ -21,7 +21,7 @@ from typing import Dict, Iterable, List, Optional
 import webview
 from webview.dom import DOMEventHandler
 
-from docmark.config import Settings
+from docmark.config import Settings, cache_dir
 from docmark.pipeline import DocumentPipeline, ProgressEvent
 from docmark.utils import secrets
 
@@ -76,14 +76,18 @@ class JsApi:
 
     def prepare_conversion(self, paths: List[str]) -> Dict:
         """Prepare a selected batch and return a confirmation preview."""
-        documents = self._collect_document_paths(paths)
+        documents, skipped_count = self._split_unconverted_documents(
+            self._collect_document_paths(paths)
+        )
         if not documents:
-            return self._selection_to_dict(None, [])
+            return self._selection_to_dict(None, [], skipped_count=skipped_count)
 
         selection_id = uuid.uuid4().hex[:12]
         with self._lock:
             self._pending_batches[selection_id] = documents
-        return self._selection_to_dict(selection_id, documents)
+        return self._selection_to_dict(
+            selection_id, documents, skipped_count=skipped_count
+        )
 
     def confirm_selection(self, selection_id: str) -> List[Dict]:
         """Start converting a previously prepared batch."""
@@ -100,19 +104,36 @@ class JsApi:
         results: List[Dict] = []
         accepted: List[Job] = []
         for path in documents:
-            job = Job(job_id=uuid.uuid4().hex[:12], path=path)
+            existing_output = DocumentPipeline.current_output_path(path)
+            if existing_output is not None:
+                job = Job(
+                    job_id=uuid.uuid4().hex[:12],
+                    path=path,
+                    status="done",
+                    percent=100.0,
+                    message=f"Already converted: {existing_output.name}",
+                    output=str(existing_output),
+                )
+            else:
+                job = Job(job_id=uuid.uuid4().hex[:12], path=path)
+                accepted.append(job)
             with self._lock:
                 self._jobs[job.job_id] = job
-            accepted.append(job)
             results.append(self._job_to_dict(job))
 
+        for job in results:
+            self._push_to_ui(job)
+
         for job in accepted:
-            self._push_to_ui(self._job_to_dict(job))
             self._pool.submit(self._run_job, job.job_id)
         return results
 
     @staticmethod
-    def _selection_to_dict(selection_id: Optional[str], documents: List[Path]) -> Dict:
+    def _selection_to_dict(
+        selection_id: Optional[str],
+        documents: List[Path],
+        skipped_count: int = 0,
+    ) -> Dict:
         preview_limit = 20
         files = [
             {"filename": path.name, "path": str(path)}
@@ -123,7 +144,19 @@ class JsApi:
             "total": len(documents),
             "files": files,
             "hidden_count": max(0, len(documents) - preview_limit),
+            "skipped_count": skipped_count,
         }
+
+    @staticmethod
+    def _split_unconverted_documents(documents: List[Path]) -> tuple[List[Path], int]:
+        remaining: List[Path] = []
+        skipped_count = 0
+        for path in documents:
+            if DocumentPipeline.current_output_path(path) is not None:
+                skipped_count += 1
+            else:
+                remaining.append(path)
+        return remaining, skipped_count
 
     @staticmethod
     def _collect_document_paths(paths: Iterable[str]) -> List[Path]:
@@ -186,6 +219,25 @@ class JsApi:
             return self.prepare_conversion([selection])
         return self.prepare_conversion(list(selection))
 
+    def retry_job(self, job_id: str) -> Optional[Dict]:
+        """Retry a failed job in-place so PDF checkpoints can resume."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if job.status != "failed":
+                return self._job_to_dict(job)
+            job.status = "queued"
+            job.percent = 0.0
+            job.message = "Retry queued"
+            job.error = None
+            job.output = None
+            payload = self._job_to_dict(job)
+
+        self._push_to_ui(payload)
+        self._pool.submit(self._run_job, job_id)
+        return payload
+
     def _run_job(self, job_id: str) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -193,7 +245,11 @@ class JsApi:
             return
 
         try:
+            last_message = ""
+
             def cb(event: ProgressEvent) -> None:
+                nonlocal last_message
+                last_message = event.message
                 self._update(
                     job_id,
                     status="converting",
@@ -206,8 +262,9 @@ class JsApi:
                 job_id,
                 status="done",
                 percent=100.0,
-                message=f"Wrote {out_path.name}",
+                message=last_message or f"Wrote {out_path.name}",
                 output=str(out_path),
+                error=None,
             )
         except Exception as e:  # noqa: BLE001
             logger.exception("Job %s failed", job_id)
@@ -293,6 +350,24 @@ class JsApi:
         # Rebuild pipeline so new settings (key, model, dpi, …) take effect.
         self._pipeline = self._build_pipeline()
         return self._settings.to_public_dict()
+
+    def clear_cache(self) -> Dict:
+        """Delete cached conversion results stored by DocMark."""
+        deleted = 0
+        bytes_deleted = 0
+        path = cache_dir()
+
+        for cache_file in path.glob("*.json"):
+            try:
+                bytes_deleted += cache_file.stat().st_size
+                cache_file.unlink()
+                deleted += 1
+            except FileNotFoundError:
+                continue
+            except OSError:
+                logger.exception("Failed to delete cache file: %s", cache_file)
+
+        return {"deleted": deleted, "bytes_deleted": bytes_deleted}
 
     # ------------------------------------------------------------------
     # OS integration
